@@ -1,0 +1,81 @@
+⏺ Phase 1 — OCR / Text Extraction (src/pipeline/stage1_ocr.py)                                                                                                                               
+                                                                                                                                                                                             
+  Goal: Accept any file and return raw text.                                                                                                                                                 
+                                                                                                                                                                                             
+  1. Write a main function stage1_ocr(file_path, source) that dispatches to one of three helpers based on source                                                                             
+  2. Text: open the file and read it as a UTF-8 string                                                                                                                                       
+  3. PDF: use pdfplumber to open the file, loop over every page, call .extract_text() on each, join all pages together                                                                       
+  4. Image: use PIL to open the image, pass it to pytesseract.image_to_data() which returns a dataframe with a word and confidence column per row, filter out low-confidence words (below    
+  ~60%), sort remaining words by their vertical then horizontal position, join into a string                                                                                                 
+                                                                                                                                                                                             
+  ---                                                                                                                                                                                        
+  Phase 2 — Cleaning + Keywords (src/pipeline/stage2_clean.py)
+                                                              
+  Goal: Normalize messy text and extract the most important words.
+                                                                                                                                                                                             
+  1. Write a stage2_clean(text) function that returns a dataclass/dict with cleaned_text and keywords                                                                                        
+  2. Normalize: strip extra whitespace, normalize unicode characters (look up unicodedata.normalize), lowercase if needed                                                                    
+  3. TF-IDF keywords: use sklearn's TfidfVectorizer — fit it on a list containing just your document, get the feature names and their scores, sort by score descending, return the top N     
+  words                                                                                                                                                                                      
+                                                                                                                                                                                             
+  ---                                                                                                                                                                                        
+  Phase 3 — Named Entity Recognition (src/pipeline/stage3_ner.py)
+                                                                 
+  Goal: Find people, orgs, dates, money amounts etc. in the text.
+                                                                                                                                                                                             
+  1. Load a spaCy model (en_core_web_sm) — do this once at module level so it's not reloaded on every call                                                                                   
+  2. Write stage3_ner(text) — pass text through the spaCy pipeline to get a doc object                                                                                                       
+  3. Loop over doc.ents, collect each entity as a dict with text and label keys                                                                                                              
+  4. EntityRuler: before the NER component, add a spaCy EntityRuler with custom patterns for things spaCy misses — e.g. invoice numbers like INV-1234, company suffixes like Ltd/LLC/Inc     
+  5. Return the full list of entity dicts                                                                                                                                                    
+                                                                                                                                                                                             
+  ---                                                                                                                                                                                        
+  Phase 4 — Document Classification (src/pipeline/stage4_classify.py)
+                                                                                                                                                                                             
+  Goal: Label the document as invoice, news, contract, or regulatory.
+                                                                                                                                                                                             
+  1. Define your DOC_RULES — a dict mapping each label to a list of keywords that signal that document type                                                                                  
+  2. Keyword baseline: count how many rule keywords appear in the text for each label, pick the label with the highest count — this is your fallback                                         
+  3. DistilBERT zero-shot: load pipeline("zero-shot-classification") from transformers, pass the text and the label names as candidate labels, it returns scores for each                    
+  4. Combine the two signals (or just use zero-shot, falling back to keyword rules if the model is unavailable)                                                                              
+  5. Return the winning label as a string                                                                                                                                                    
+                                                                                                                                                                                             
+  ---                                                                                                                                                                                        
+  Phase 5 — Embeddings + FAISS (src/store/faiss_store.py)                                                                                                                                    
+                                                         
+  Goal: Store documents as vectors so you can do semantic search later.
+                                                                                                                                                                                             
+  1. Load a SentenceTransformer model at init — all-MiniLM-L6-v2 is a good small one                                                                                                         
+  2. Create a FAISS IndexFlatIP (inner product) index with dimension 384 (the output size of that model)                                                                                     
+  3. add(text, label): encode the text into a vector, normalize it, call index.add(), append text and label to in-memory lists                                                               
+  4. search(query, top_k): encode the query the same way, call index.search() which returns distances and indices, use the indices to look up the matching texts and labels, return them as a
+   list of dicts                                                                                                                                                                             
+  5. save(): write the FAISS index to disk with faiss.write_index(), write texts and labels to a JSON file                                                                                   
+  6. load(): read them back with faiss.read_index() and json.load()                                                                                                                          
+                                                                                                                                                                                             
+  ---                                                                                                                                                                                        
+  Phase 6 — ReAct Agent (src/agent/)                                                                                                                                                         
+                                                                                                                                                                                             
+  Goal: Use an LLM in a loop with tools to answer questions about your documents.
+                                                                                                                                                                                             
+  Tools (tools.py):                                                                                                                                                                          
+  1. search_documents(query) — calls store.search() and returns matching chunks
+  2. get_documents_by_label(label) — filters the store by doc type                                                                                                                           
+  3. list_entities(text) — runs stage3_ner on a given text        
+                                                                                                                                                                                             
+  Agent (react_agent.py):                                                                                                                                                                    
+  1. Define your tools as a list of dicts in Anthropic's tool-use format (name, description, input schema)                                                                                   
+  2. Write a loop: send the question + tools to the Claude API                                                                                                                               
+  3. If the response contains a tool_use block, call the matching Python function with the given inputs, append the result as a tool_result message, loop again                              
+  4. If the response is just text, the agent is done — return that text as the answer                                                                                                        
+  5. Add a verbose flag that prints each Thought/Action/Observation when True                                                                                                                
+                                                                                                                                                                                             
+  ---                                                                                                                                                                                        
+  Wiring it all together (src/qa.py)                                                                                                                                                         
+                                                                                                                                                                                             
+  Once all phases work individually:
+  1. Call stage1_ocr → raw text                                                                                                                                                              
+  2. Call pipeline.run() which chains stages 2–4 → PipelineResult                                                                                                                            
+  3. Call store.add() with the cleaned text and doc type         
+  4. Call run_document_agent(question) → answer                                                                                                                                              
+  5. Return the answer                                       
