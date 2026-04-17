@@ -1,0 +1,23 @@
+# Core NLP
+spacy>=3.7
+sentence-transformers>=3.0
+transformers>=4.40
+torch>=2.2
+
+# Vector store
+faiss-cpu>=1.8
+
+# OCR / document parsing
+pdfplumber>=0.11
+pytesseract>=0.3
+Pillow>=10.0
+
+# Agent / LLM
+anthropic>=0.28
+langchain>=0.2
+langchain-anthropic>=0.1
+
+# Utilities
+python-dotenv>=1.0
+numpy>=1.26
+scikit-learn>=1.4
