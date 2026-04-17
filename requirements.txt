@@ -8,6 +8,8 @@ torch>=2.2
 faiss-cpu>=1.8
 
 # OCR / document parsing
+paddlepaddle>=2.4
+paddleocr>=2.0
 pdfplumber>=0.11
 pytesseract>=0.3
 Pillow>=10.0
